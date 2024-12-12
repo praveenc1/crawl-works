@@ -3,3 +3,5 @@
 .ipynb_checkpoints
 myenv
 warc-rs/target
+data
+**/.terraform/providers
