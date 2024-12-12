@@ -1,9 +1,37 @@
 # AWS Provider configuration is assumed to be defined elsewhere
 
+# Create a default VPC
+resource "aws_default_vpc" "default" {
+  enable_dns_support   = true
+  enable_dns_hostnames = true
+
+  tags = {
+    Name = "Default VPC"
+  }
+}
+
+# Create default subnets in each AZ
+resource "aws_default_subnet" "default_az1" {
+  availability_zone = "us-east-1a"
+
+  tags = {
+    Name = "Default subnet for us-east-1a"
+  }
+}
+
+resource "aws_default_subnet" "default_az2" {
+  availability_zone = "us-east-1b"
+
+  tags = {
+    Name = "Default subnet for us-east-1b"
+  }
+}
+
 # Security Group for Jupyter Server
 resource "aws_security_group" "jupyter_sg" {
   name        = "jupyter-server-sg"
   description = "Security group for Jupyter server"
+  vpc_id      = aws_default_vpc.default.id
 
   ingress {
     from_port   = 22
@@ -25,16 +53,27 @@ resource "aws_security_group" "jupyter_sg" {
   }
 }
 
+# Add your SSH key
+resource "aws_key_pair" "jupyter_key" {
+  key_name   = "jupyter-key"
+  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICrU8V8KXdc+jkKlWDvK+zKcm7L9EkBLq3eOpaRvi6yt praveen@WonderOfTheSeas.local"
+}
+
 # EC2 Instance
 resource "aws_instance" "jupyter_server" {
   ami           = "ami-0453ec754f44f9a4a" # Amazon Linux 2023 AMI - update as needed
   instance_type = "t2.micro"
+  subnet_id     = aws_default_subnet.default_az1.id  # Using first AZ subnet
 
   vpc_security_group_ids = [aws_security_group.jupyter_sg.id]
-  key_name              = "jupyter-key-name" # Replace with your key pair name
+  key_name              = aws_key_pair.jupyter_key.key_name  # Reference the key we just created
 
   user_data = <<-EOF
               #!/bin/bash
+              # Update SSH configuration to listen on port 8022
+              sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
+              systemctl restart sshd
+
               yum update -y
               yum install -y python3-pip python3-devel
               
@@ -43,48 +82,50 @@ resource "aws_instance" "jupyter_server" {
 
               # Create jupyter config
               mkdir -p /root/.jupyter
-              jupyter notebook --generate-config
-              
-              # Generate random port and password
-              JUPYTER_PORT=$(shuf -i 10000-65000 -n 1)
-              JUPYTER_PASSWORD=$(openssl rand -hex 32)
-              
-              # Configure Jupyter
-              cat > /root/.jupyter/jupyter_notebook_config.py << EOL
-              c.NotebookApp.ip = '0.0.0.0'
-              c.NotebookApp.port = $JUPYTER_PORT
-              c.NotebookApp.password = '$JUPYTER_PASSWORD'
-              c.NotebookApp.allow_root = True
-              c.NotebookApp.open_browser = False
+
+              # Generate and configure Jupyter
+              cat > /root/.jupyter/jupyter_server_config.py << EOL
+              c.ServerApp.ip = '127.0.0.1'  # Only accept localhost connections
+              c.ServerApp.port = 8888
+              c.ServerApp.password = ''  # Use token authentication
+              c.ServerApp.allow_remote_access = False
+              c.ServerApp.allow_origin = '*'
               EOL
-              
+
+              # Create startup script
+              cat > /root/start_jupyter.sh << EOL
+              #!/bin/bash
+              cd /root
+              jupyter notebook --no-browser
+              EOL
+
+              # Make startup script executable
+              chmod +x /root/start_jupyter.sh
+
               # Create systemd service
               cat > /etc/systemd/system/jupyter.service << EOL
               [Unit]
               Description=Jupyter Notebook Server
+              After=network.target
 
               [Service]
               Type=simple
-              ExecStart=/usr/local/bin/jupyter notebook --config=/root/.jupyter/jupyter_notebook_config.py
-              WorkingDirectory=/root
               User=root
+              ExecStart=/root/start_jupyter.sh
+              WorkingDirectory=/root
+              Restart=always
 
               [Install]
               WantedBy=multi-user.target
               EOL
 
-              # Setup SSH tunnel
-              echo "GatewayPorts yes" >> /etc/ssh/sshd_config
-              systemctl restart sshd
-
-              # Start Jupyter service
+              # Enable and start Jupyter service
               systemctl daemon-reload
               systemctl enable jupyter
               systemctl start jupyter
 
-              # Save credentials for retrieval
-              echo "Jupyter Port: $JUPYTER_PORT" > /root/jupyter_credentials.txt
-              echo "Jupyter Password: $JUPYTER_PASSWORD" >> /root/jupyter_credentials.txt
+              # Save initial token for retrieval
+              jupyter server list > /root/jupyter_token.txt
               EOF
 
   tags = {
@@ -100,16 +141,23 @@ output "jupyter_server_ip" {
 # Output connection instructions
 output "connection_instructions" {
   value = <<EOT
-    1. SSH into the instance:
-       ssh -i <your-key-pair.pem> ec2-user@${aws_instance.jupyter_server.public_ip}
-    
-    2. Get Jupyter credentials:
-       sudo cat /root/jupyter_credentials.txt
-    
-    3. Create SSH tunnel:
-       ssh -i <your-key-pair.pem> -L 8888:<JUPYTER_PORT> ec2-user@${aws_instance.jupyter_server.public_ip}
-    
-    4. Access Jupyter in your browser:
+    1. SSH into the instance to get the Jupyter token:
+       ssh -p 8022 ec2-user@${aws_instance.jupyter_server.public_ip}
+       sudo cat /root/jupyter_token.txt
+
+    2. Create SSH tunnel:
+       ssh -p 8022 -N -L 8888:localhost:8888 ec2-user@${aws_instance.jupyter_server.public_ip}
+
+    3. Access Jupyter in your browser:
        http://localhost:8888
+       Use the token from step 1 to log in
+
+    Tip: Add this to your ~/.ssh/config for easier access:
+    
+    Host jupyter-aws
+        HostName ${aws_instance.jupyter_server.public_ip}
+        User ec2-user
+        Port 8022
+        IdentityFile ~/.ssh/id_ed25519
 EOT
 }

@@ -32,7 +32,6 @@ fn main() {
 
     //let mut file = WarcReader::from_path_gzip(warc_name)?;
 
-    let mut count = 0;
     let mut skipped = 0;
     let mut file = WarcReader::from_path_gzip(pstr).unwrap();
     let mut stream_iter = file.stream_records();
@@ -52,10 +51,13 @@ fn main() {
         println!("content: {}", content);
         let links2 = extract_links(content);
         //add links to links
-        links.extend(links2);
-        if count >= 3 {
-            break;
-        };
+        
+        if !links2.is_empty() {
+            links.extend(links2);
+            if count >= 3 {
+                break;
+            };
+        }
     }
     //print links
     for link in links {
