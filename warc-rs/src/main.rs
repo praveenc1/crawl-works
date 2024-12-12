@@ -12,7 +12,7 @@ use std::path::Path;
 use warc::WarcReader;
 
 fn main() {
-    let pstr = "../examples/CC-MAIN-20241014005649-20241014035649-00707.warc.gz";
+    let pstr = "../data/CC-MAIN-20241015204737-20241015234737-00610.warc.gz";
     //let path = Path::new();
     //let file = File::open(path).unwrap();
     //let decoder = GzDecoder::new(file);
@@ -39,7 +39,6 @@ fn main() {
     let mut count = 0;
 
     while let Some(record) = stream_iter.next_item() {
-        count += 1;
         //extract the content of the record
         let rec = record.unwrap();
         let buf = rec.into_buffered().unwrap();
@@ -48,10 +47,13 @@ fn main() {
         let content_result = String::from_utf8_lossy(body);
         //convert content_result into &str and call extract_links
         let content = content_result.as_ref();
-        println!("content: {}", content);
+        // println!("content: {}", content);
         let links2 = extract_links(content);
+        if !links2.is_empty() {
+            count += 1;
+        }
         //add links to links
-        
+
         if !links2.is_empty() {
             links.extend(links2);
             if count >= 3 {

@@ -1,5 +1,5 @@
 [package]
-name = "warc-rs"
+name = "crawl-works"
 version = "0.1.0"
 edition = "2021"
 
