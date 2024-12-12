@@ -8,18 +8,17 @@
             "cargo": {
                 "args": [
                     "build",
-                    "--bin=web_crawl",
-                    "--package=web_crawl",
-                    "--manifest-path=Cargo.toml"
+                    "--bin=crawl-works",
+                    "--package=crawl-works",
+                    "--manifest-path=warc-rs/Cargo.toml"
                 ],
                 "filter": {
                     "kind": "bin"
                 }
             },
-            "program": "${workspaceFolder}/target/debug/web_crawl",
+            "program": "${workspaceFolder}/warc-rs/target/debug/warc-rs",
             "args": [],
-            "cwd": "${workspaceFolder}",
-            "preLaunchTask": "cargo build"
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

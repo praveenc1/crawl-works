@@ -40,7 +40,7 @@ fn main() {
     let mut count = 0;
 
     while let Some(record) = stream_iter.next_item() {
-        count += 1;
+        
         //extract the content of the record
         let rec = record.unwrap();
         let buf = rec.into_buffered().unwrap();
@@ -49,11 +49,15 @@ fn main() {
         let content_result = String::from_utf8_lossy(body);
         //convert content_result into &str and call extract_links
         let content = content_result.as_ref();
-        println!("content: {}", content);
+       // println!("content: {}", content);
         let links2 = extract_links(content);
+        if !links2.is_empty() {
+            count += 1;
+        }
         //add links to links
         links.extend(links2);
-        if count >= 3 {
+
+        if count >= 300 {
             break;
         };
     }
