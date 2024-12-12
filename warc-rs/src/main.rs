@@ -12,7 +12,7 @@ use std::path::Path;
 use warc::WarcReader;
 
 fn main() {
-    let pstr = "../examples/CC-MAIN-20241014005649-20241014035649-00707.warc.gz";
+    let pstr = "../data/CC-MAIN-20241015204737-20241015234737-00610.warc.gz";
     //let path = Path::new();
     //let file = File::open(path).unwrap();
     //let decoder = GzDecoder::new(file);
