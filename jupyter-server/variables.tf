@@ -11,4 +11,7 @@ variable "jupyter_password" {
 }
 
 variable "instance_type" {
-  description = "EC2 instanc
+  description = "EC2 instance type"
+  type        = string
+  default     = "t3.medium"
+}
