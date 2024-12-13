@@ -30,10 +30,17 @@ fn main() {
         };
     }
 
-    //let mut file = WarcReader::from_path_gzip(warc_name)?;
+    // let mut file = WarcReader::from_path_gzip(warc_name)?;
 
-    let mut skipped = 0;
-    let mut file = WarcReader::from_path_gzip(pstr).unwrap();
+    
+    let file = WarcReader::from_path_gzip(pstr);
+    let mut file = match file {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("Failed to open WARC file: {}", e);
+            return;
+        }
+    };
     let mut stream_iter = file.stream_records();
 
     let mut count = 0;
@@ -50,12 +57,8 @@ fn main() {
         // println!("content: {}", content);
         let links2 = extract_links(content);
         if !links2.is_empty() {
-            count += 1;
-        }
-        //add links to links
-
-        if !links2.is_empty() {
             links.extend(links2);
+            count += 1;
             if count >= 3 {
                 break;
             };
