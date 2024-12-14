@@ -10,17 +10,20 @@ def get_network_stats(interface):
         # Run the `ip -s link show <interface>` command
         output = subprocess.check_output(f"ip -s link show {interface}", shell=True, text=True)
 
-        # Extract RX and TX bytes (cumulative total)
-        # Look for lines matching RX: or TX: and capture bytes
-        rx_match = re.search(r"RX:\s+bytes\s+(\d+)", output)
-        tx_match = re.search(r"TX:\s+bytes\s+(\d+)", output)
+        # Extract RX and TX bytes from the appropriate lines
+        lines = output.splitlines()
+        for i, line in enumerate(lines):
+            if "RX:" in line:
+                rx_line = lines[i + 1].strip()
+            if "TX:" in line:
+                tx_line = lines[i + 1].strip()
 
-        if rx_match and tx_match:
-            rx_bytes = int(rx_match.group(1))
-            tx_bytes = int(tx_match.group(1))
-            return rx_bytes, tx_bytes
-        else:
-            raise ValueError(f"Could not parse RX/TX bytes from the output: {output}")
+        # Extract the first number (bytes) from the RX and TX lines
+        rx_bytes = int(rx_line.split()[0])
+        tx_bytes = int(tx_line.split()[0])
+
+        return rx_bytes, tx_bytes
+
     except Exception as e:
         print(f"Error getting network stats: {e}")
         return None, None
@@ -37,7 +40,7 @@ def calculate_bandwidth(prev_rx, prev_tx, curr_rx, curr_tx, interval):
     return rx_gbps, tx_gbps
 
 def main():
-    interface = "ens5"  # Replace with your network interface
+    interface = "ens3"  # Replace with your network interface
     interval = 1  # Interval in seconds
 
     print(f"Monitoring network bandwidth on interface {interface}...")
@@ -59,6 +62,10 @@ def main():
             print("Failed to retrieve network stats. Skipping iteration.")
             continue
 
+        # Debug: Log raw RX and TX bytes
+        #print(f"DEBUG: Prev RX: {prev_rx}, Prev TX: {prev_tx}")
+        #print(f"DEBUG: Curr RX: {curr_rx}, Curr TX: {curr_tx}")
+
         # Calculate bandwidth usage
         rx_gbps, tx_gbps = calculate_bandwidth(prev_rx, prev_tx, curr_rx, curr_tx, interval)
 
@@ -71,3 +78,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
