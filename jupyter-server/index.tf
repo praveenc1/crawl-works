@@ -1,5 +1,12 @@
 # AWS Provider configuration is assumed to be defined elsewhere
 
+terraform {
+  backend "local" {
+    path = var.tf_state_dir
+  }
+}
+
+
 # Create a default VPC
 resource "aws_default_vpc" "default" {
   enable_dns_support   = true
@@ -60,206 +67,122 @@ resource "aws_security_group" "jupyter_sg" {
 # Add your SSH key
 resource "aws_key_pair" "jupyter_key" {
   key_name   = "jupyter-key"
-  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICrU8V8KXdc+jkKlWDvK+zKcm7L9EkBLq3eOpaRvi6yt praveen@WonderOfTheSeas.local"
+  public_key = var.public_key
 }
 
-# Create EBS volume
-resource "aws_ebs_volume" "jupyter_data" {
-  availability_zone = "us-east-1a"  # Same AZ as the EC2 instance
-  size             = 1024  # 1TB in GiB
-  type             = "gp3"
+# Create IAM role for EC2
+resource "aws_iam_role" "jupyter_role" {
+  name = "jupyter_server_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
 
   tags = {
-    Name = "jupyter-data"
+    Name = "jupyter-server-role"
   }
 }
 
-# Attach EBS volume to EC2 instance
-resource "aws_volume_attachment" "jupyter_data_attachment" {
-  device_name = "/dev/sdf"
-  volume_id   = aws_ebs_volume.jupyter_data.id
-  instance_id = aws_instance.jupyter_server.id
+# Create IAM policy for Common Crawl access
+resource "aws_iam_role_policy" "commoncrawl_access" {
+  name = "commoncrawl_access"
+  role = aws_iam_role.jupyter_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListAllMyBuckets",
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::commoncrawl",
+          "arn:aws:s3:::commoncrawl/*",
+          "arn:aws:s3:::crawler-works",
+          "arn:aws:s3:::crawler-works/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Create instance profile
+resource "aws_iam_instance_profile" "jupyter_profile" {
+  name = "jupyter_server_profile"
+  role = aws_iam_role.jupyter_role.name
 }
 
 # EC2 Instance
 resource "aws_instance" "jupyter_server" {
-  ami           = "ami-0453ec754f44f9a4a"
+  ami           = var.ami
   instance_type = var.instance_type
   subnet_id     = aws_default_subnet.default_az1.id
 
   vpc_security_group_ids = [aws_security_group.jupyter_sg.id]
   key_name              = aws_key_pair.jupyter_key.key_name
+  iam_instance_profile  = aws_iam_instance_profile.jupyter_profile.name
 
   root_block_device {
     encrypted   = true
     volume_size = 20
   }
 
-  user_data = <<-EOF
-              #!/bin/bash
-              # Wait for EBS volume to be attached
-              while [ ! -e /dev/nvme1n1 ]; do sleep 1; done
+  # Request ephemeral storage
+  ephemeral_block_device {
+    device_name  = "/dev/sdb"
+    virtual_name = "ephemeral0"
+  }
 
-              # Format the volume if it's not already formatted
-              if ! blkid /dev/nvme1n1; then
-                mkfs -t xfs /dev/nvme1n1
-              fi
-
-              # Create mount point and add to fstab
-              mkdir -p /jupyter-data
-              echo "/dev/nvme1n1 /jupyter-data xfs defaults,nofail 0 2" >> /etc/fstab
-              mount -a
-
-              # Set permissions
-              chown -R ec2-user:ec2-user /jupyter-data
-
-              # Update SSH configuration to listen on port 8022
-              sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
-              systemctl restart sshd
-
-              yum update -y
-              yum install -y python3-pip python3-devel gcc
-
-              # Create jupyter user
-              useradd -m jupyter
-              mkdir -p /home/jupyter/.jupyter
-              chown -R jupyter:jupyter /home/jupyter
-
-              # Install Jupyter and essential packages
-              sudo -u jupyter pip3 install --user jupyter numpy pandas matplotlib scikit-learn
-
-              # Generate Jupyter config with password
-              JUPYTER_HASH=$(python3 -c "from jupyter_server.auth import passwd; print(passwd('${var.jupyter_password}'))")
-
-              # Configure Jupyter
-              cat > /home/jupyter/.jupyter/jupyter_server_config.py << EOL
-              c.ServerApp.ip = '127.0.0.1'
-              c.ServerApp.port = 8888
-              c.ServerApp.password = '$JUPYTER_HASH'
-              c.ServerApp.allow_remote_access = False
-              c.ServerApp.allow_origin = '*'
-              c.ServerApp.root_dir = '/jupyter-data'
-              EOL
-
-              # Create systemd service
-              cat > /etc/systemd/system/jupyter.service << EOL
-              [Unit]
-              Description=Jupyter Notebook Server
-              After=network.target
-
-              [Service]
-              Type=simple
-              User=jupyter
-              Environment="PATH=/home/jupyter/.local/bin:/usr/local/bin:/usr/bin"
-              ExecStart=/home/jupyter/.local/bin/jupyter notebook --config=/home/jupyter/.jupyter/jupyter_server_config.py
-              WorkingDirectory=/jupyter-data
-              Restart=always
-
-              [Install]
-              WantedBy=multi-user.target
-              EOL
-
-              # Set proper permissions
-              chown -R jupyter:jupyter /jupyter-data
-              chmod 700 /home/jupyter/.jupyter
-
-              # Update SSH configuration to listen on port 8022
-              sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
-              systemctl restart sshd
-
-              # Enable and start Jupyter service
-              systemctl daemon-reload
-              systemctl enable jupyter
-              systemctl start jupyter
-
-              # Wait for Jupyter to start and save token
-              sleep 10
-              sudo journalctl -u jupyter.service | grep token | tail -n 1 > /home/jupyter/token.txt
-              chown jupyter:jupyter /home/jupyter/token.txt
-              EOF
+  user_data = templatefile("${path.module}/user_data.sh", {
+    jupyter_hash_base64 = base64encode(var.jupyter_hash),
+    ssh_public_key  = var.public_key,
+    git_user_private_key = var.git_user_private_key,
+    git_user_pub_key = var.git_user_pub_key
+  })
 
   tags = {
     Name = "jupyter-server"
   }
 }
 
-# Get Jupyter token
-resource "null_resource" "get_jupyter_token" {
-  depends_on = [
-    aws_instance.jupyter_server,
-    aws_volume_attachment.jupyter_data_attachment
-  ]
-
-  provisioner "local-exec" {
-    command = <<-EOF
-      while ! nc -z ${aws_instance.jupyter_server.public_ip} 8022; do
-        echo "Waiting for SSH to become available..."
-        sleep 5
-      done
-      
-      sleep 30
-      
-      ssh -o StrictHostKeyChecking=no \
-          -o ConnectTimeout=60 \
-          -i ~/.ssh/id_jup_nb \
-          -p 8022 \
-          ec2-user@${aws_instance.jupyter_server.public_ip} \
-          'sudo journalctl -u jupyter.service | grep token | tail -n 1 | cut -d= -f2 | tr -d " "' \
-          > jupyter_token.txt
-    EOF
-  }
+# Get the IP from the fixed-ip configuration output
+data "aws_eip" "fixed_ip" {
+  #public_ip = ["bash", "-c", "cd ../fixed-ip && tofu output -json | jq -r '.public_ip.value'"]
+  #id = ["bash", "-c", "cd ../fixed-ip && tofu output -json | jq -r '.allocation_id.value'"]
+  public_ip = "3.218.16.212"
+  id        = "eipalloc-08a4d99cd8d8f99ef"
+}
+# Associate EIP with EC2 instance
+resource "aws_eip_association" "jupyter_eip_assoc" {
+  instance_id   = aws_instance.jupyter_server.id
+  allocation_id = data.aws_eip.fixed_ip.id
 }
 
-# Update SSH config
-resource "null_resource" "update_ssh_config" {
+resource "null_resource" "set_jupyter_password" {
   depends_on = [aws_instance.jupyter_server]
 
   provisioner "local-exec" {
-    command = <<-EOF
-      # Create backup of existing config
-      cp ~/.ssh/config ~/.ssh/config.bak 2>/dev/null || true
-      
-      # Remove existing jupyter-aws section if it exists
-      sed -i.bak '/^Host jupyter-aws/,/^$/d' ~/.ssh/config || true
-      
-      # Append new configuration
-      cat >> ~/.ssh/config << SSHCONFIG
-
-Host jupyter-aws
-    HostName ${aws_instance.jupyter_server.public_ip}
-    User ec2-user
-    Port 8022
-    IdentityFile ~/.ssh/id_jup_nb
-    StrictHostKeyChecking no
-
-SSHCONFIG
-    EOF
+    command = <<EOT
+    bw_jupyter_password=$(bw get password jupyter --session "${var.bw_session}") && \
+    ssh jupyter-aws "echo 'jupyter:$bw_jupyter_password' | sudo chpasswd"
+    EOT
   }
-
-  triggers = {
-    instance_ip = aws_instance.jupyter_server.public_ip
-  }
-}
-
-# Read the token file
-data "local_file" "jupyter_token" {
-  depends_on = [null_resource.get_jupyter_token]
-  filename   = "jupyter_token.txt"
-}
-
-# Clean output for just the token
-output "jupyter_token" {
-  value = chomp(data.local_file.jupyter_token.content)
-  description = "Jupyter notebook access token"
 }
 
 # Update the connection instructions
 output "connection_instructions" {
   value = <<EOT
-    Jupyter Token: ${chomp(data.local_file.jupyter_token.content)}
-
-    Your SSH config has been updated. You can now:
-
     1. Create SSH tunnel:
        ssh -N -L 8888:localhost:8888 jupyter-aws
 
@@ -269,6 +192,7 @@ output "connection_instructions" {
     3. Use the token above to log in
 
     Direct SSH access:
-       ssh jupyter-aws
+       ssh jupyter-aws         # for ec2-user
+       ssh jupyter-aws-user    # for jupyter user
 EOT
 }

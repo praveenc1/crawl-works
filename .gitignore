@@ -7,3 +7,6 @@ warc-rs/target
 data
 **/*.duckdb
 .tmp
+**/secrets*
+**/.terraform
+**/.terraform*
