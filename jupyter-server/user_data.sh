@@ -50,11 +50,14 @@ yum install -y python python3-pip python3-devel gcc unzip aws-cli vim git htop
 
 # Install Jupyter and essential packages
 sudo su jupyter -c "{
-  pip install --user jupyter numpy pandas matplotlib scikit-learn boto3 duckdb;
+  pip install --user jupyter numpy pandas matplotlib scikit-learn boto3 duckdb
   
   mkdir -p /jupyter-data/{projects,data}
   cd /jupyter-data/projects
   git clone https://github.com/praveenc1/crawl-works.git
+
+  git config --global user.email "praveen.cherukuri@gmail.com"
+  git config --global user.name "Praveen Cherukuri AWS"
 }"
 
 echo "jupyter ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
