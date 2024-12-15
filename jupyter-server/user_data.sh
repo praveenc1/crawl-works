@@ -29,6 +29,7 @@ echo "${ssh_public_key}" > /home/jupyter/.ssh/authorized_keys
 
 # Set proper permissions
 chmod 700 /home/jupyter/.ssh
+chmod 700 /home/jupyter/.jupyter
 chmod 600 /home/jupyter/.ssh/authorized_keys
 chown -R jupyter:jupyter /home/jupyter/.ssh
 chown -R jupyter:jupyter /home/jupyter/.jupyter
@@ -45,16 +46,16 @@ sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
 systemctl restart sshd
 
 yum update -y;
-yum install -y python python3-pip python3-devel gcc unzip aws-cli vim git
+yum install -y python python3-pip python3-devel gcc unzip aws-cli vim git htop
 
 # Install Jupyter and essential packages
 sudo su jupyter -c "{
   pip install --user jupyter numpy pandas matplotlib scikit-learn boto3 duckdb;
   
-  mkdir -p /jupyter-data/projects
+  mkdir -p /jupyter-data/{projects,data}
   cd /jupyter-data/projects
   git clone https://github.com/praveenc1/crawl-works.git
-  }"
+}"
 
 echo "jupyter ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 echo "ec2-user ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
@@ -132,9 +133,6 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOL
-
-# Set proper permissions
-chmod 700 /home/jupyter/.jupyter
 
 # Enable and start Jupyter service
 systemctl daemon-reload
