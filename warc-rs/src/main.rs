@@ -49,6 +49,12 @@ fn main() {
     while let Some(record) = stream_iter.next_item() {
         //extract the content of the record
         let rec = record.unwrap();
+        
+        let source_url = rec.header(WarcHeader::TargetURI)
+            .and_then(|uri| uri.parse::<String>().ok())
+            .unwrap_or_else(|| "Unknown".to_string());
+       
+
         let buf = rec.into_buffered().unwrap();
         let body = buf.body();
         //convert body to string
@@ -64,11 +70,12 @@ fn main() {
                 break;
             };
         }
+        //print links
+        for link in &links {
+            println!("Source URL {} has Links: \n{}", source_url, link);
+        }
     }
-    //print links
-    for link in links {
-        println!("Links: \n{}", link);
-    }
+    println!("Number of links: {}", links.len());
 }
 
 fn extract_links(content: &str) -> Vec<String> {
