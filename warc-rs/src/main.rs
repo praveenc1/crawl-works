@@ -49,6 +49,12 @@ fn main() {
                 .value_name("Segment")
                 .help("Sets the input segment file to use"),
         )
+        .arg(
+            Arg::new("no-decompress")
+                .short('n')
+                .long("no-decompress")
+                .help("Bypasses decompression of the input file"),
+        )
         .get_matches();
 
     let pstr = matches
@@ -58,14 +64,19 @@ fn main() {
 
     info!("Using segment file: {}", pstr);
 
+    let mut uncompressed_path = pstr.to_string();
+
     // Decompress file first
-    let uncompressed_path = match decompress_file(pstr) {
-        Ok(path) => path,
-        Err(e) => {
-            error!("Failed to decompress file: {}", e);
-            return;
-        }
-    };
+    let bypass_decompression = matches.contains_id("no-decompress");
+    if !bypass_decompression {
+        match decompress_file(pstr) {
+            Ok(path) => uncompressed_path = path,
+            Err(e) => {
+                error!("Failed to decompress file: {}", e);
+                return;
+            }
+        };
+    }
 
     // Now use memory mapping on uncompressed file
     let file = File::open(&uncompressed_path).expect("Failed to open uncompressed file");
