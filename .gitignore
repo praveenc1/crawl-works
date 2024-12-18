@@ -3,8 +3,10 @@
 .ipynb_checkpoints
 myenv
 warc-rs/target
-data
 **/.terraform/providers
-=======
-data/
->>>>>>> vijay
+data
+**/*.duckdb
+.tmp
+**/secrets*
+**/.terraform
+**/.terraform*
