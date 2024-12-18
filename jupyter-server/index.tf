@@ -1,5 +1,12 @@
 # AWS Provider configuration is assumed to be defined elsewhere
 
+terraform {
+  backend "local" {
+    path = var.tf_state_dir
+  }
+}
+
+
 # Create a default VPC
 resource "aws_default_vpc" "default" {
   enable_dns_support   = true
@@ -13,6 +20,8 @@ resource "aws_default_vpc" "default" {
 # Create default subnets in each AZ
 resource "aws_default_subnet" "default_az1" {
   availability_zone = "us-east-1a"
+  
+  depends_on = [aws_default_vpc.default]  # Add explicit dependency
 
   tags = {
     Name = "Default subnet for us-east-1a"
@@ -21,6 +30,8 @@ resource "aws_default_subnet" "default_az1" {
 
 resource "aws_default_subnet" "default_az2" {
   availability_zone = "us-east-1b"
+  
+  depends_on = [aws_default_vpc.default]  # Add explicit dependency
 
   tags = {
     Name = "Default subnet for us-east-1b"
@@ -34,10 +45,10 @@ resource "aws_security_group" "jupyter_sg" {
   vpc_id      = aws_default_vpc.default.id
 
   ingress {
-    from_port   = 22
-    to_port     = 22
+    from_port   = 8022
+    to_port     = 8022
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
+    cidr_blocks = [for ip in var.allowed_ip : "${ip}/32"]
     description = "SSH access"
   }
 
@@ -56,108 +67,132 @@ resource "aws_security_group" "jupyter_sg" {
 # Add your SSH key
 resource "aws_key_pair" "jupyter_key" {
   key_name   = "jupyter-key"
-  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICrU8V8KXdc+jkKlWDvK+zKcm7L9EkBLq3eOpaRvi6yt praveen@WonderOfTheSeas.local"
+  public_key = var.public_key
+}
+
+# Create IAM role for EC2
+resource "aws_iam_role" "jupyter_role" {
+  name = "jupyter_server_role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name = "jupyter-server-role"
+  }
+}
+
+# Create IAM policy for Common Crawl access
+resource "aws_iam_role_policy" "commoncrawl_access" {
+  name = "commoncrawl_access"
+  role = aws_iam_role.jupyter_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:ListAllMyBuckets",
+          "s3:*"
+        ]
+        Resource = [
+          "arn:aws:s3:::commoncrawl",
+          "arn:aws:s3:::commoncrawl/*",
+          "arn:aws:s3:::crawler-works",
+          "arn:aws:s3:::crawler-works/*"
+        ]
+      }
+    ]
+  })
+}
+
+# Create instance profile
+resource "aws_iam_instance_profile" "jupyter_profile" {
+  name = "jupyter_server_profile"
+  role = aws_iam_role.jupyter_role.name
 }
 
 # EC2 Instance
 resource "aws_instance" "jupyter_server" {
-  ami           = "ami-0453ec754f44f9a4a" # Amazon Linux 2023 AMI - update as needed
-  instance_type = "t2.micro"
-  subnet_id     = aws_default_subnet.default_az1.id  # Using first AZ subnet
+  ami           = var.ami
+  instance_type = var.instance_type
+  subnet_id     = aws_default_subnet.default_az1.id
 
   vpc_security_group_ids = [aws_security_group.jupyter_sg.id]
-  key_name              = aws_key_pair.jupyter_key.key_name  # Reference the key we just created
+  key_name              = aws_key_pair.jupyter_key.key_name
+  iam_instance_profile  = aws_iam_instance_profile.jupyter_profile.name
 
-  user_data = <<-EOF
-              #!/bin/bash
-              # Update SSH configuration to listen on port 8022
-              sed -i 's/#Port 22/Port 8022/' /etc/ssh/sshd_config
-              systemctl restart sshd
+  root_block_device {
+    encrypted   = true
+    volume_size = 20
+  }
 
-              yum update -y
-              yum install -y python3-pip python3-devel
-              
-              # Install Jupyter and essential packages
-              pip3 install jupyter numpy pandas matplotlib scikit-learn
+  # Request ephemeral storage
+  ephemeral_block_device {
+    device_name  = "/dev/sdb"
+    virtual_name = "ephemeral0"
+  }
 
-              # Create jupyter config
-              mkdir -p /root/.jupyter
-
-              # Generate and configure Jupyter
-              cat > /root/.jupyter/jupyter_server_config.py << EOL
-              c.ServerApp.ip = '127.0.0.1'  # Only accept localhost connections
-              c.ServerApp.port = 8888
-              c.ServerApp.password = ''  # Use token authentication
-              c.ServerApp.allow_remote_access = False
-              c.ServerApp.allow_origin = '*'
-              EOL
-
-              # Create startup script
-              cat > /root/start_jupyter.sh << EOL
-              #!/bin/bash
-              cd /root
-              jupyter notebook --no-browser
-              EOL
-
-              # Make startup script executable
-              chmod +x /root/start_jupyter.sh
-
-              # Create systemd service
-              cat > /etc/systemd/system/jupyter.service << EOL
-              [Unit]
-              Description=Jupyter Notebook Server
-              After=network.target
-
-              [Service]
-              Type=simple
-              User=root
-              ExecStart=/root/start_jupyter.sh
-              WorkingDirectory=/root
-              Restart=always
-
-              [Install]
-              WantedBy=multi-user.target
-              EOL
-
-              # Enable and start Jupyter service
-              systemctl daemon-reload
-              systemctl enable jupyter
-              systemctl start jupyter
-
-              # Save initial token for retrieval
-              jupyter server list > /root/jupyter_token.txt
-              EOF
+  user_data = templatefile("${path.module}/user_data.sh", {
+    jupyter_hash_base64 = base64encode(var.jupyter_hash),
+    ssh_public_key  = var.public_key,
+    git_user_private_key = var.git_user_private_key,
+    git_user_pub_key = var.git_user_pub_key
+  })
 
   tags = {
     Name = "jupyter-server"
   }
 }
 
-# Output the instance public IP
-output "jupyter_server_ip" {
-  value = aws_instance.jupyter_server.public_ip
+# Get the IP from the fixed-ip configuration output
+data "aws_eip" "fixed_ip" {
+  #public_ip = ["bash", "-c", "cd ../fixed-ip && tofu output -json | jq -r '.public_ip.value'"]
+  #id = ["bash", "-c", "cd ../fixed-ip && tofu output -json | jq -r '.allocation_id.value'"]
+  public_ip = "3.218.16.212"
+  id        = "eipalloc-08a4d99cd8d8f99ef"
+}
+# Associate EIP with EC2 instance
+resource "aws_eip_association" "jupyter_eip_assoc" {
+  instance_id   = aws_instance.jupyter_server.id
+  allocation_id = data.aws_eip.fixed_ip.id
 }
 
-# Output connection instructions
+resource "null_resource" "set_jupyter_password" {
+  depends_on = [aws_instance.jupyter_server]
+
+  provisioner "local-exec" {
+    command = <<EOT
+    bw_jupyter_password=$(bw get password jupyter --session "${var.bw_session}") && \
+    ssh jupyter-aws "echo 'jupyter:$bw_jupyter_password' | sudo chpasswd"
+    EOT
+  }
+}
+
+# Update the connection instructions
 output "connection_instructions" {
   value = <<EOT
-    1. SSH into the instance to get the Jupyter token:
-       ssh -p 8022 ec2-user@${aws_instance.jupyter_server.public_ip}
-       sudo cat /root/jupyter_token.txt
+    1. Create SSH tunnel:
+       ssh -N -L 8888:localhost:8888 jupyter-aws
 
-    2. Create SSH tunnel:
-       ssh -p 8022 -N -L 8888:localhost:8888 ec2-user@${aws_instance.jupyter_server.public_ip}
-
-    3. Access Jupyter in your browser:
+    2. Access Jupyter in your browser:
        http://localhost:8888
-       Use the token from step 1 to log in
+       
+    3. Use the token above to log in
 
-    Tip: Add this to your ~/.ssh/config for easier access:
-    
-    Host jupyter-aws
-        HostName ${aws_instance.jupyter_server.public_ip}
-        User ec2-user
-        Port 8022
-        IdentityFile ~/.ssh/id_ed25519
+    Direct SSH access:
+       ssh jupyter-aws         # for ec2-user
+       ssh jupyter-aws-user    # for jupyter user
 EOT
 }
