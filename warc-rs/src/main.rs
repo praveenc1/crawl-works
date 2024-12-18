@@ -21,6 +21,7 @@ fn main() {
     //let warc_reader = WarcReader::new(reader);
 
     let mut links: Vec<String> = Vec::new();
+    let re = Regex::new(r#"<a\s+(?:[^>]*?\s+)?href=["']([^"']+)["']"#).unwrap();
 
     use warc::WarcHeader;
     use warc::WarcReader;
@@ -45,6 +46,7 @@ fn main() {
     let mut stream_iter = file.stream_records();
 
     let mut count = 0;
+    let mut pageCount = 0;
 
     while let Some(record) = stream_iter.next_item() {
         //extract the content of the record
@@ -53,7 +55,8 @@ fn main() {
         let source_url = rec.header(WarcHeader::TargetURI)
             .and_then(|uri| uri.parse::<String>().ok())
             .unwrap_or_else(|| "Unknown".to_string());
-       
+        
+        pageCount += 1;
 
         let buf = rec.into_buffered().unwrap();
         let body = buf.body();
@@ -62,37 +65,28 @@ fn main() {
         //convert content_result into &str and call extract_links
         let content = content_result.as_ref();
         // println!("content: {}", content);
-        let links2 = extract_links(content);
+        let links2 = extract_links(content, &re);
         if !links2.is_empty() {
             links.extend(links2);
             count += 1;
-            if count >= 3 {
-                break;
-            };
+        //    if count >= 3 {
+        //         break;
+        //     };
         }
         //print links
-        for link in &links {
+       /*  for link in &links {
             println!("Source URL {} has Links: \n{}", source_url, link);
-        }
+        } */
     }
-    println!("Number of links: {}", links.len());
+    println!("Number of pages and links : {} and {}", pageCount, links.len());
 }
 
-fn extract_links(content: &str) -> Vec<String> {
-    let mut links = Vec::new();
-    let mut start = 0;
-    while let Some(href_start) = content[start..].find("href=\"") {
-        let href_start = start + href_start + 6;
-        match content[href_start..].find("\"") {
-            Some(end) => {
-                let href_end = href_start + end;
-                let link = content[href_start..href_end].to_string();
-                links.push(link);
-                start = href_end + 1;
-            }
-            None => break,
-        }
-    }
+fn extract_links(content: &str, re: &Regex) -> Vec<String> {
+   
+    let links: Vec<String> = re
+        .captures_iter(content)
+        .map(|cap| cap[1].to_string())
+        .collect();
     links
 }
 
@@ -106,7 +100,8 @@ mod tests {
                      <a href="https://test.com">Another</a>
                      <div href="invalid">Not a link</div>"#;
 
-        let links = extract_links(html);
+        let re = Regex::new(r#"<a\s+(?:[^>]*?\s+)?href=["']([^"']+)["']"#).unwrap();
+        let links = extract_links(html, &re);
 
         assert_eq!(links.len(), 2);
         assert_eq!(links[0], "http://example.com");
