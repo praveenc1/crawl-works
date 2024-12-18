@@ -127,13 +127,13 @@ fn main() {
         }
     }
 
+    let elapsed_time = start_time.elapsed();
     info!(
         "Number of pages and links: {} and {}",
         page_count,
         links.len()
     );
 
-    let elapsed_time = start_time.elapsed();
     info!("Total execution time: {:?}", elapsed_time);
 }
 
