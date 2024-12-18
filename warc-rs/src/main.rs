@@ -6,6 +6,7 @@
 //5. Prints the number of links
 
 use flate2::read::GzDecoder;
+use regex::Regex;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
@@ -71,20 +72,11 @@ fn main() {
 }
 
 fn extract_links(content: &str) -> Vec<String> {
-    let mut links = Vec::new();
-    let mut start = 0;
-    while let Some(href_start) = content[start..].find("href=\"") {
-        let href_start = start + href_start + 6;
-        match content[href_start..].find("\"") {
-            Some(end) => {
-                let href_end = href_start + end;
-                let link = content[href_start..href_end].to_string();
-                links.push(link);
-                start = href_end + 1;
-            }
-            None => break,
-        }
-    }
+    let re = Regex::new(r#"<a\s+[^>]*href=["']([^"']+)["']""#).unwrap();
+    let links: Vec<String> = re
+        .captures_iter(content)
+        .map(|cap| cap[1].to_string())
+        .collect();
     links
 }
 
