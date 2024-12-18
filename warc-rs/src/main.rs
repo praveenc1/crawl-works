@@ -6,7 +6,9 @@
 //5. Prints the number of links
 
 use clap::{Arg, Command};
+use env_logger;
 use flate2::read::GzDecoder;
+use log::{debug, error, info, warn};
 use regex::Regex;
 use std::fs::File;
 use std::io::BufReader;
@@ -14,6 +16,8 @@ use std::path::Path;
 use warc::WarcReader;
 
 fn main() {
+    env_logger::init();
+
     let matches = Command::new("crawl-works")
         .arg(
             Arg::new("segment")
@@ -33,6 +37,8 @@ fn main() {
     //let reader = BufReader::new(decoder);
     //let warc_reader = WarcReader::new(reader);
 
+    info!("Using segment file: {}", pstr);
+
     let mut links: Vec<String> = Vec::new();
     let re = Regex::new(r#"<a\s+(?:[^>]*?\s+)?href=["']([^"']+)["']"#).unwrap();
 
@@ -51,7 +57,7 @@ fn main() {
     let mut file = match file {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("Failed to open WARC file: {}", e);
+            error!("Failed to open WARC file: {}", e);
             return;
         }
     };
@@ -63,11 +69,12 @@ fn main() {
     while let Some(record) = stream_iter.next_item() {
         //extract the content of the record
         let rec = record.unwrap();
-        
-        let source_url = rec.header(WarcHeader::TargetURI)
+
+        let source_url = rec
+            .header(WarcHeader::TargetURI)
             .and_then(|uri| uri.parse::<String>().ok())
             .unwrap_or_else(|| "Unknown".to_string());
-        
+
         pageCount += 1;
 
         let buf = rec.into_buffered().unwrap();
@@ -81,20 +88,23 @@ fn main() {
         if !links2.is_empty() {
             links.extend(links2);
             count += 1;
-        //    if count >= 3 {
-        //         break;
-        //     };
+            //    if count >= 3 {
+            //         break;
+            //     };
         }
         //print links
-       /*  for link in &links {
-            println!("Source URL {} has Links: \n{}", source_url, link);
-        } */
+        for link in &links {
+            debug!("Source URL {} has Links: \n{}", source_url, link);
+        }
     }
-    println!("Number of pages and links : {} and {}", pageCount, links.len());
+    info!(
+        "Number of pages and links: {} and {}",
+        pageCount,
+        links.len()
+    );
 }
 
 fn extract_links(content: &str, re: &Regex) -> Vec<String> {
-   
     let links: Vec<String> = re
         .captures_iter(content)
         .map(|cap| cap[1].to_string())
