@@ -5,6 +5,7 @@
 //4. Counts the number of links
 //5. Prints the number of links
 
+use clap::{Arg, Command};
 use flate2::read::GzDecoder;
 use regex::Regex;
 use std::fs::File;
@@ -13,8 +14,20 @@ use std::path::Path;
 use warc::WarcReader;
 
 fn main() {
-    let pstr = "../data/CC-MAIN-20241015204737-20241015234737-00610.warc.gz";
-    //let path = Path::new();
+    let matches = Command::new("crawl-works")
+        .arg(
+            Arg::new("segment")
+                .short('s')
+                .long("segment")
+                .value_name("Segment")
+                .help("Sets the input segment file to use"),
+        )
+        .get_matches();
+
+    let pstr = matches
+        .get_one("segment")
+        .map(String::as_str)
+        .unwrap_or("../data/CC-MAIN-20241015204737-20241015234737-00610.warc.gz");
     //let file = File::open(path).unwrap();
     //let decoder = GzDecoder::new(file);
     //let reader = BufReader::new(decoder);
@@ -34,7 +47,6 @@ fn main() {
 
     // let mut file = WarcReader::from_path_gzip(warc_name)?;
 
-    
     let file = WarcReader::from_path_gzip(pstr);
     let mut file = match file {
         Ok(f) => f,

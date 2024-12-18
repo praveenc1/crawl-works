@@ -1,0 +1,11 @@
+{
+  "sqltools.connections": [
+    {
+      "sqltools.useNodeRuntime": true,
+      "previewLimit": 50,
+      "driver": "DuckDB",
+      "name": "nano",
+      "database": "${workspaceFolder:crawl-works}/data/cc_index_nano.duckdb"
+    }
+  ]
+}
